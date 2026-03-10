@@ -3,6 +3,10 @@
   "name": "Web Data Scraper",
   "version": "1.0",
   "description": "Extracts structured data from web pages and sends to MongoDB.",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
   "action": {
     "default_popup": "popup.html"
   },

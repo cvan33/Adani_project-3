@@ -26,13 +26,27 @@ async def save_scraped_data(data: ScrapedDataInput):
         document = data.model_dump()
         document["timestamp"] = datetime.utcnow()
         
-        # Insert into MongoDB
-        result = await collection.insert_one(document)
+        # Upsert into MongoDB based on URL
+        url = document.get("url")
+        result = await collection.update_one(
+            {"url": url}, 
+            {"$set": document}, 
+            upsert=True
+        )
         
+        if result.upserted_id:
+            print(f"✅ Data extracted and saved successfully to MongoDB! Inserted ID: {result.upserted_id}")
+            inserted_id = str(result.upserted_id)
+            message = "Data saved successfully"
+        else:
+            print(f"✅ Data for URL {url} updated successfully in MongoDB!")
+            inserted_id = None # or we could fetch the existing ID if needed
+            message = "Data updated successfully"
 
         return {
-            "message": "Data saved successfully",
-            "inserted_id": str(result.inserted_id)
+            "message": message,
+            "inserted_id": inserted_id
         }
     except Exception as e:
+        print(f"❌ Error saving extracted data: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error saving data: {str(e)}")

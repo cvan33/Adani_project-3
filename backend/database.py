@@ -15,5 +15,6 @@ try:
     client = AsyncIOMotorClient(MONGO_URI)
     db = client.scraper_db
     collection = db.scraped_data
+    print("✅ Successfully connected to MongoDB Database!")
 except Exception as e:
-    print(f"Error connecting to MongoDB: {e}")
+    print(f"❌ Error connecting to MongoDB: {e}")

@@ -45,8 +45,13 @@
                 // Deep clone the body so we can modify it without breaking the live page
                 const clonedBody = document.body.cloneNode(true);
 
-                // Remove unwanted elements: nav, footer, header, scripts, styles, links
-                const elementsToRemove = clonedBody.querySelectorAll('nav, footer, header, script, style, a, noscript, iframe');
+                // Remove unwanted elements: nav, footer, header, scripts, styles, links, sidebars, etc.
+                const elementsToRemove = clonedBody.querySelectorAll(`
+                    nav, footer, header, script, style, a, noscript, iframe, 
+                    [role="navigation"], [role="banner"], [role="contentinfo"],
+                    .nav, .navigation, .navbar, .header, .footer, .sidebar, .aside,
+                    #nav, #navigation, #navbar, #header, #footer, #sidebar, #aside
+                `);
                 elementsToRemove.forEach(el => el.remove());
 
                 // Extract the remaining text content, split by newlines, and clean up
@@ -55,53 +60,58 @@
                     .map(text => text.replace(/\s+/g, ' ').trim())
                     .filter(text => text.length > 0);
 
-                // Extract server metrics from the array
-                let metrics = {
-                    availability: null,
-                    cpu: null,
-                    memory: null,
-                    disk: null,
-                    downtimes: null,
-                    hostname: null,
-                    ip_address: null,
-                    os_name: null,
-                    os_version: null,
-                    kernel_version: null,
-                    processor: null,
-                    ram_size: null,
-                    uptime: null
+                // Helper to find value following a label in contentArray
+                const getValueAfter = (label) => {
+                    const idx = contentArray.indexOf(label);
+                    return (idx !== -1 && idx + 1 < contentArray.length) ? contentArray[idx + 1] : null;
                 };
 
-                for (let i = 0; i < contentArray.length; i++) {
-                    let val = contentArray[i];
+                // Helper to find value before a label (for % metrics)
+                const getValueBefore = (label, offset = 1) => {
+                    const idx = contentArray.indexOf(label);
+                    return (idx !== -1 && idx - offset >= 0) ? contentArray[idx - offset] : null;
+                };
 
-                    // Look-back for format: "100" "%" "Availability"
-                    if (val === "Availability" && i >= 2) metrics.availability = contentArray[i - 2] + contentArray[i - 1];
-                    if (val === "CPU" && i >= 2 && contentArray[i - 1] === "%" && !metrics.cpu) metrics.cpu = contentArray[i - 2] + contentArray[i - 1];
-                    if (val === "Memory" && i >= 2 && contentArray[i - 1] === "%" && !metrics.memory) metrics.memory = contentArray[i - 2] + contentArray[i - 1];
-                    if (val === "Disk" && i >= 2 && contentArray[i - 1] === "%" && !metrics.disk) metrics.disk = contentArray[i - 2] + contentArray[i - 1];
-                    if (val === "Downtimes" && i >= 1 && !metrics.downtimes) metrics.downtimes = contentArray[i - 1];
+                const performance = {
+                    availability: getValueBefore("Availability", 2) ? getValueBefore("Availability", 2) + "%" : null,
+                    cpu_usage: getValueBefore("CPU", 2) ? getValueBefore("CPU", 2) + "%" : null,
+                    memory_usage: getValueBefore("Memory", 2) ? getValueBefore("Memory", 2) + "%" : null,
+                    disk_usage: getValueBefore("Disk", 2) ? getValueBefore("Disk", 2) + "%" : null,
+                    downtimes: getValueBefore("Downtimes", 1)
+                };
 
-                    // Look-ahead for keys
-                    if (val === "Hostname" && !metrics.hostname) metrics.hostname = contentArray[i + 1];
-                    if (val === "IP Address" && !metrics.ip_address) metrics.ip_address = contentArray[i + 1];
-                    if (val === "OS Name" && !metrics.os_name) metrics.os_name = contentArray[i + 1];
-                    if (val === "OS Version" && !metrics.os_version) metrics.os_version = contentArray[i + 1];
-                    if (val === "Kernel Version" && !metrics.kernel_version) metrics.kernel_version = contentArray[i + 1];
-                    if (val === "Processor" && !metrics.processor) metrics.processor = contentArray[i + 1];
-                    if (val === "RAM Size" && !metrics.ram_size) metrics.ram_size = contentArray[i + 1];
+                const system = {
+                    hostname: getValueAfter("Hostname"),
+                    ip_address: getValueAfter("IP Address"),
+                    os_name: getValueAfter("OS Name"),
+                    os_version: getValueAfter("OS Version"),
+                    kernel_version: getValueAfter("Kernel Version"),
+                    processor: getValueAfter("Processor"),
+                    manufacturer: getValueAfter("Manufacturer"),
+                    model: getValueAfter("Model"),
+                    serial_number: getValueAfter("Serial Number")
+                };
 
-                    // Uptime is on a single line usually
-                    if (val.startsWith("Uptime :")) metrics.uptime = val.replace("Uptime :", "").trim();
-                }
+                const resources = {
+                    ram_size: getValueAfter("RAM Size"),
+                    cpu_cores: getValueAfter("CPU Cores"),
+                    total_disk_partitions: getValueAfter("Total Disk Partition"),
+                    total_network_interfaces: getValueAfter("Total Network Interfaces"),
+                    last_boot_time: getValueAfter("Last Boot Time"),
+                    time_zone: getValueAfter("Time Zone"),
+                    public_ip: getValueAfter("Public IP Address"),
+                    location: getValueAfter("Country") ? `${getValueAfter("Country")}, ${getValueAfter("Region") || ""}`.trim().replace(/,$/, "") : null
+                };
 
-                // Prepare payload to match our Pydantic schema
+                // Prepare payload to match our new Pydantic schema
                 const payload = {
                     url: url,
                     title: title,
                     headings: headings,
                     raw_content: contentArray,
-                    server_metrics: metrics
+                    performance: performance,
+                    system: system,
+                    resources: resources
                 };
 
                 // 2. Send to Backend API
@@ -137,15 +147,15 @@
         // Run immediately upon activation/load
         extractAndSendData();
 
-        // Implement MutationObserver to detect DOM changes (real-time data updates)
+        // Implement MutationObserver to detect DOM changes (real-time data updates) after initial trigger
         let timeoutId = null;
         const observer = new MutationObserver((mutations) => {
-            // Debounce: Wait 3 seconds after the DOM STOPS updating before we scrape to avoid spamming the server
+            // Debounce: Wait 2 seconds after the DOM STOPS updating before we scrape to avoid spamming the server
             clearTimeout(timeoutId);
             timeoutId = setTimeout(() => {
-                console.log("Web Data Scraper: Real-time DOM change detected, re-scanning page...");
+                console.log("Web Data Scraper: Real-time DOM change detected, updating data...");
                 extractAndSendData();
-            }, 3000);
+            }, 2000);
         });
 
         // Start observing the document body for added/removed nodes or text changes
@@ -155,7 +165,7 @@
             characterData: true
         });
 
-        return { success: true, message: "Scraper initialized and observing real-time changes." };
+        return { success: true, message: "Scraper initialized and watching for real-time changes." };
 
     } catch (error) {
         console.error("Scraper Initialization Error:", error);
